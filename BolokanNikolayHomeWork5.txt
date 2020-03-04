@@ -1,0 +1,104 @@
+1.Создать триггер, запрещающий изменение данных в столбцах e_name и salary таблицы EMP в выходные, 
+праздничные дни, в нерабочие часы с 18:00 до 8:00 и по четвергам с 12:00 до 13:00.
+==============================================================
+Create table holidays(
+name varchar2(100) not null,
+data date not null)
+
+insert into holidays values('Новый год','01/01/2019');
+insert into holidays values('Рождество Христово по старому стилю','01/07/2019');
+insert into holidays values('Рождество Христово по старому стилю','01/08/2019');
+insert into holidays values('Международный женский день','03/08/2019');
+insert into holidays values('Пасха','04/28/2019');
+insert into holidays values('Пасха','04/29/2019');
+insert into holidays values('День международной солидарности трудящихся','05/01/2019');
+insert into holidays values('Радуница','05/06/2019');
+insert into holidays values('День Победы','05/09/2019');
+insert into holidays values('Международный день защиты детей','06/01/2019');
+insert into holidays values('День независимости','08/27/2019');
+insert into holidays values('Праздник "Лимба ноастрэ','08/31/2019');
+insert into holidays values('Рождество Христово по новому стилю','12/25/2019');
+
+create or replace TRIGGER  for_emp
+BEFORE 
+INSERT or update or delete  ON emp
+FOR EACH ROW
+DECLARE
+v_v number(4);
+weekend exception;
+holiday exception;
+thursday exception;
+time1 exception;
+BEGIN 
+select count(*) into v_v from holidays where data=to_date(sysdate+3/24,'mm-dd-yyyy');
+if v_v >0 then raise holiday;end if;
+select count(*) into v_v from dual where to_char(sysdate+3/24,'d')in(1,7);
+if v_v >0 then raise weekend;end if;
+select count(*) into v_v from dual where to_char(sysdate+3/24,'hh24')>=12 and to_char(sysdate+3/24,'hh24')<=13 and to_char(sysdate+3/24,'d')=5;
+if v_v >0 then raise thursday;end if;
+select count(*) into v_v from dual where to_char(sysdate+3/24,'hh24')>=18 or to_char(sysdate+3/24,'hh24')<=8;
+if v_v >0 then raise time1;end if;
+EXCEPTION
+when holiday then raise_application_error(-20001,'Праздничные дни');
+when weekend then raise_application_error(-20001,'Выходные');
+when thursday then raise_application_error(-20001,'Четверг не рабочие часы');
+when time1 then raise_application_error(-20001,'Не рабочие часы');
+end for_emp;
+======================================
+
+2.Создать представление, которое включает следующие данные: фамилия сотрудника, имя сотрудника, название отдела, зарплата, дата приёма на работу. 
+Создать триггер instead of для  обновления данных, содержащихся в базовых таблицах.
+==================================================================
+create or replace view emp_view as
+select substr(e_name, 0, instr(e.e_name, ' ')) surname, substr(e.e_name, instr(e_name, ' ')+1) name,d.d_name, e.salary, e.DATE_HIRE from emp e,dept d where d.d_no=e.d_no;
+
+create or replace TRIGGER EmpInsert
+INSTEAD OF INSERT or update
+ON Emp_view
+FOR EACH ROW 
+DECLARE 
+v_v number(2);
+v_d_no dept.d_no%type;
+v_d_name dept.d_name%type;
+v_e_no emp.e_no%type;
+v_location dept.LOCATION%type;
+v_e_name emp.e_name%type;
+e_e_name exception;
+BEGIN
+IF INSERTING then
+select count(*) into v_v from dept where d_name=:new.d_name;
+if v_v = 0 then
+v_d_name:=:new.d_name;
+v_location:='NON';
+select max(d_no)+1 into v_d_no from dept;
+INSERT INTO dept values(
+v_d_no,v_d_name,v_location);
+else
+select d_no into v_d_no from dept where d_name=:new.d_name;
+end if;
+v_e_name:= (:new.surname||' '||:new.name);
+select count(*) into v_v from emp where e_name=v_e_name;
+if v_v > 0 then raise e_e_name;
+else
+select max(e_no)+1 into v_e_no from emp;
+INSERT INTO emp values(
+v_e_no,v_e_name,:new.DATA,:new.SALARY,'NON',v_d_no);
+end if;
+ELSIF UPDATING THEN
+update emp set e_name = :new.surname||' '||substr(e_name, instr(e_name, ' ')+1) 
+where  substr(e_name, 0, instr(e_name, ' ')-1) =:old.surname;
+
+update emp set e_name = substr(e_name, 0, instr(e_name, ' ')) ||''|| :new.name
+where substr(e_name, instr(e_name, ' ')+1)=:old.name;
+
+update dept set D_NAME=:new.D_NAME where
+d_name=:old.d_name;
+
+update emp set salary = :new.salary where salary=:old.salary;
+
+update emp set date_hire = :new.data where date_hire=:old.data;
+end if;
+EXCEPTION
+WHEN e_e_name THEN raise_application_error(-20005,'Name Emp exist');
+END EmpInsert;
+
